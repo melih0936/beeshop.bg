@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CheckCircle, PlusCircle } from "lucide-react";
 import Header from "@/components/Header";
@@ -50,7 +50,9 @@ function fileToDataUrl(file: File) {
 export default function PostListingPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
-  const [checkingUser, setCheckingUser] = useState(true);
+  const [checkingUser, setCheckingUser] = useState(false);
+  const [loginRequired, setLoginRequired] = useState(true);
+  const [profileCheckError, setProfileCheckError] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -68,53 +70,71 @@ export default function PostListingPage() {
   const [validationReasons, setValidationReasons] = useState<string[]>([]);
   const [validationSuggestions, setValidationSuggestions] = useState<string[]>([]);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const authCheckDoneRef = useRef(false);
 
- useEffect(() => {
-  let mounted = true;
+  useEffect(() => {
+    let mounted = true;
+    authCheckDoneRef.current = false;
 
-  async function checkUser() {
-    try {
-      setCheckingUser(true);
-
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-
-      if (!mounted) return;
-
-      if (error || !user) {
-        setCheckingUser(false);
-        router.replace("/auth?mode=login&next=/post");
+    const hardTimeout = window.setTimeout(() => {
+      if (!mounted || authCheckDoneRef.current) {
         return;
       }
 
-      setUserId(user.id);
-      setSellerName(user.user_metadata?.full_name ?? "");
-      setSellerPhone(user.user_metadata?.phone ?? "");
-      setSellerRegion(user.user_metadata?.region ?? "Русе");
+      authCheckDoneRef.current = true;
+      setProfileCheckError(
+        "Проверката на профила отне твърде дълго. Провери връзката и опитай отново.",
+      );
       setCheckingUser(false);
-    } catch {
-      if (!mounted) return;
-      setCheckingUser(false);
-      setErrorMessage("Не успяхме да проверим профила. Влез отново.");
-      router.replace("/auth?mode=login&next=/post");
+    }, 8000);
+
+    async function checkUser() {
+      try {
+        setCheckingUser(true);
+        setLoginRequired(false);
+        setProfileCheckError("");
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!mounted || authCheckDoneRef.current) return;
+
+        if (!session?.user) {
+          authCheckDoneRef.current = true;
+          setLoginRequired(true);
+          setCheckingUser(false);
+          return;
+        }
+
+        const user = session.user;
+        authCheckDoneRef.current = true;
+        setUserId(user.id);
+        setSellerName(user.user_metadata?.full_name ?? "");
+        setSellerPhone(user.user_metadata?.phone ?? "");
+        setSellerRegion(user.user_metadata?.region ?? "Русе");
+        setCheckingUser(false);
+      } catch {
+        if (!mounted || authCheckDoneRef.current) return;
+        authCheckDoneRef.current = true;
+        setProfileCheckError(
+          "Не успяхме да проверим профила. Провери връзката и опитай отново.",
+        );
+        setCheckingUser(false);
+      } finally {
+        if (mounted && authCheckDoneRef.current) {
+          window.clearTimeout(hardTimeout);
+        }
+      }
     }
-  }
 
-  checkUser();
+    checkUser();
 
-  const timeout = window.setTimeout(() => {
-    if (!mounted) return;
-    setCheckingUser(false);
-    setErrorMessage("Проверката на профила отне твърде дълго. Влез отново.");
-  }, 6000);
-
-  return () => {
-    mounted = false;
-    window.clearTimeout(timeout);
-  };
-}, [router, supabase]);
+    return () => {
+      mounted = false;
+      window.clearTimeout(hardTimeout);
+    };
+  }, [supabase]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -377,9 +397,88 @@ export default function PostListingPage() {
         className="min-h-screen bg-cover bg-fixed bg-center text-slate-950"
         style={{ backgroundImage: "url('/bee-background.png')" }}
       >
-        <div className="min-h-screen bg-white/70 px-4 py-8">
-          <div className="mx-auto max-w-3xl rounded-lg border border-slate-200 bg-white/95 p-5 text-sm font-semibold shadow-sm">
-            Проверка на профила...
+        <div className="min-h-screen bg-gradient-to-b from-white/80 via-amber-50/55 to-white/80">
+          <Header />
+          <div className="px-4 py-8">
+            <div className="mx-auto max-w-3xl rounded-lg border border-slate-200 bg-white/95 p-5 text-sm font-semibold shadow-sm">
+              Проверка на профила...
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (loginRequired) {
+    return (
+      <main
+        className="min-h-screen bg-cover bg-fixed bg-center text-slate-950"
+        style={{ backgroundImage: "url('/bee-background.png')" }}
+      >
+        <div className="min-h-screen bg-gradient-to-b from-white/80 via-amber-50/55 to-white/80">
+          <Header />
+          <div className="px-4 py-8">
+            <section className="mx-auto max-w-3xl rounded-2xl border border-amber-100 bg-white/95 p-5 shadow-sm ring-1 ring-white/80 backdrop-blur">
+              <h1 className="text-2xl font-black tracking-tight">
+                Влез в профила си
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                За да публикуваш обява, трябва първо да влезеш или да създадеш
+                профил.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href="/auth?mode=login&next=/post"
+                  className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-amber-600 active:scale-[0.98]"
+                >
+                  Вход / Регистрация
+                </Link>
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Назад към обявите
+                </Link>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (profileCheckError) {
+    return (
+      <main
+        className="min-h-screen bg-cover bg-fixed bg-center text-slate-950"
+        style={{ backgroundImage: "url('/bee-background.png')" }}
+      >
+        <div className="min-h-screen bg-gradient-to-b from-white/80 via-amber-50/55 to-white/80">
+          <Header />
+          <div className="px-4 py-8">
+            <section className="mx-auto max-w-3xl rounded-2xl border border-red-100 bg-white/95 p-5 shadow-sm ring-1 ring-white/80 backdrop-blur">
+              <h1 className="text-2xl font-black tracking-tight">
+                Неуспешна проверка
+              </h1>
+              <p className="mt-2 text-sm font-semibold leading-6 text-red-700">
+                {profileCheckError}
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-amber-600 active:scale-[0.98]"
+                >
+                  Опитай отново
+                </button>
+                <Link
+                  href="/auth?mode=login&next=/post"
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Вход / Регистрация
+                </Link>
+              </div>
+            </section>
           </div>
         </div>
       </main>
@@ -792,4 +891,3 @@ export default function PostListingPage() {
     </main>
   );
 }
-
